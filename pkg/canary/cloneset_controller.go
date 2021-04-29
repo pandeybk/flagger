@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -30,6 +29,7 @@ import (
 
 	flaggerv1 "github.com/fluxcd/flagger/pkg/apis/flagger/v1beta1"
 	clientset "github.com/fluxcd/flagger/pkg/client/clientset/versioned"
+	kruiseappsv1alpha1 "github.com/openkruise/kruise-api/apps/v1alpha1"
 	kruiseclientset "github.com/openkruise/kruise-api/client/clientset/versioned"
 )
 
@@ -74,29 +74,29 @@ func (c *CloneSetController) ScaleToZero(cd *flaggerv1.Canary) error {
 
 func (c *CloneSetController) ScaleFromZero(cd *flaggerv1.Canary) error {
 	targetName := cd.Spec.TargetRef.Name
-	dep, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+	cloneset, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("daemonset %s.%s query error: %w", targetName, cd.Namespace, err)
+		return fmt.Errorf("cloneset %s.%s query error: %w", targetName, cd.Namespace, err)
 	}
 
-	depCopy := dep.DeepCopy()
+	clonesetCopy := cloneset.DeepCopy()
 	for k := range cloneSetScaleDownNodeSelector {
-		delete(depCopy.Spec.Template.Spec.NodeSelector, k)
+		delete(clonesetCopy.Spec.Template.Spec.NodeSelector, k)
 	}
 
-	_, err = c.kubeClient.AppsV1().DaemonSets(dep.Namespace).Update(context.TODO(), depCopy, metav1.UpdateOptions{})
+	_, err = c.kruiseClient.AppsV1alpha1().CloneSets(cloneset.Namespace).Update(context.TODO(), clonesetCopy, metav1.UpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("scaling up daemonset %s.%s failed: %w", depCopy.GetName(), depCopy.Namespace, err)
+		return fmt.Errorf("scaling up cloneset %s.%s failed: %w", clonesetCopy.GetName(), clonesetCopy.Namespace, err)
 	}
 	return nil
 }
 
-// Initialize creates the primary DaemonSet, scales down the canary DaemonSet,
+// Initialize creates the primary CloneSet, scales down the canary CloneSet,
 // and returns the pod selector label and container ports
 func (c *CloneSetController) Initialize(cd *flaggerv1.Canary) (err error) {
-	err = c.createPrimaryDaemonSet(cd, c.includeLabelPrefix)
+	err = c.createPrimaryCloneSet(cd, c.includeLabelPrefix)
 	if err != nil {
-		return fmt.Errorf("createPrimaryDaemonSet failed: %w", err)
+		return fmt.Errorf("createPrimaryCloneSet failed: %w", err)
 	}
 
 	if cd.Status.Phase == "" || cd.Status.Phase == flaggerv1.CanaryPhaseInitializing {
@@ -107,7 +107,7 @@ func (c *CloneSetController) Initialize(cd *flaggerv1.Canary) (err error) {
 		}
 
 		c.logger.With("canary", fmt.Sprintf("%s.%s", cd.Name, cd.Namespace)).
-			Infof("Scaling down DaemonSet %s.%s", cd.Spec.TargetRef.Name, cd.Namespace)
+			Infof("Scaling down CloneSet %s.%s", cd.Spec.TargetRef.Name, cd.Namespace)
 		if err := c.ScaleToZero(cd); err != nil {
 			return fmt.Errorf("ScaleToZero failed: %w", err)
 		}
@@ -120,9 +120,9 @@ func (c *CloneSetController) Promote(cd *flaggerv1.Canary) error {
 	targetName := cd.Spec.TargetRef.Name
 	primaryName := fmt.Sprintf("%s-primary", targetName)
 
-	canary, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+	canary, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("damonset %s.%s get query error: %v", targetName, cd.Namespace, err)
+		return fmt.Errorf("cloneset %s.%s get query error: %v", targetName, cd.Namespace, err)
 	}
 
 	label, labelValue, err := c.getSelectorLabel(canary)
@@ -131,9 +131,9 @@ func (c *CloneSetController) Promote(cd *flaggerv1.Canary) error {
 		return fmt.Errorf("getSelectorLabel failed: %w", err)
 	}
 
-	primary, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), primaryName, metav1.GetOptions{})
+	primary, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), primaryName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("daemonset %s.%s get query error: %w", primaryName, cd.Namespace, err)
+		return fmt.Errorf("cloneset %s.%s get query error: %w", primaryName, cd.Namespace, err)
 	}
 
 	// promote secrets and config maps
@@ -168,9 +168,9 @@ func (c *CloneSetController) Promote(cd *flaggerv1.Canary) error {
 	primaryCopy.Spec.Template.Labels = makePrimaryLabels(canary.Spec.Template.Labels, primaryLabelValue, label)
 
 	// apply update
-	_, err = c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Update(context.TODO(), primaryCopy, metav1.UpdateOptions{})
+	_, err = c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Update(context.TODO(), primaryCopy, metav1.UpdateOptions{})
 	if err != nil {
-		return fmt.Errorf("updating daemonset %s.%s template spec failed: %w",
+		return fmt.Errorf("updating cloneset %s.%s template spec failed: %w",
 			primaryCopy.GetName(), primaryCopy.Namespace, err)
 	}
 	return nil
@@ -179,9 +179,9 @@ func (c *CloneSetController) Promote(cd *flaggerv1.Canary) error {
 // HasTargetChanged returns true if the canary DaemonSet pod spec has changed
 func (c *CloneSetController) HasTargetChanged(cd *flaggerv1.Canary) (bool, error) {
 	targetName := cd.Spec.TargetRef.Name
-	canary, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+	canary, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
-		return false, fmt.Errorf("daemonset %s.%s get query error: %w", targetName, cd.Namespace, err)
+		return false, fmt.Errorf("cloneset %s.%s get query error: %w", targetName, cd.Namespace, err)
 	}
 
 	// ignore `cloneSetScaleDownNodeSelector` node selector
@@ -201,48 +201,48 @@ func (c *CloneSetController) HasTargetChanged(cd *flaggerv1.Canary) (bool, error
 func (c *CloneSetController) GetMetadata(cd *flaggerv1.Canary) (string, string, map[string]int32, error) {
 	targetName := cd.Spec.TargetRef.Name
 
-	canaryDae, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+	canaryCloneset, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
-		return "", "", nil, fmt.Errorf("daemonset %s.%s get query error: %w", targetName, cd.Namespace, err)
+		return "", "", nil, fmt.Errorf("cloneset %s.%s get query error: %w", targetName, cd.Namespace, err)
 	}
 
-	label, labelValue, err := c.getSelectorLabel(canaryDae)
+	label, labelValue, err := c.getSelectorLabel(canaryCloneset)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("getSelectorLabel failed: %w", err)
 	}
 
 	var ports map[string]int32
 	if cd.Spec.Service.PortDiscovery {
-		ports = getPorts(cd, canaryDae.Spec.Template.Spec.Containers)
+		ports = getPorts(cd, canaryCloneset.Spec.Template.Spec.Containers)
 	}
 	return label, labelValue, ports, nil
 }
 
-func (c *CloneSetController) createPrimaryDaemonSet(cd *flaggerv1.Canary, includeLabelPrefix []string) error {
+func (c *CloneSetController) createPrimaryCloneSet(cd *flaggerv1.Canary, includeLabelPrefix []string) error {
 	targetName := cd.Spec.TargetRef.Name
 	primaryName := fmt.Sprintf("%s-primary", cd.Spec.TargetRef.Name)
 
-	canaryDae, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+	canaryCloneset, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("daemonset %s.%s get query error: %w", targetName, cd.Namespace, err)
+		return fmt.Errorf("cloneset %s.%s get query error: %w", targetName, cd.Namespace, err)
 	}
 
-	if canaryDae.Spec.UpdateStrategy.Type != "" &&
-		canaryDae.Spec.UpdateStrategy.Type != appsv1.RollingUpdateDaemonSetStrategyType {
-		return fmt.Errorf("daemonset %s.%s must have RollingUpdate strategy but have %s",
-			targetName, cd.Namespace, canaryDae.Spec.UpdateStrategy.Type)
+	if canaryCloneset.Spec.UpdateStrategy.Type != "" &&
+		canaryCloneset.Spec.UpdateStrategy.Type != kruiseappsv1alpha1.RecreateCloneSetUpdateStrategyType {
+		return fmt.Errorf("cloneset %s.%s must have RollingUpdate strategy but have %s",
+			targetName, cd.Namespace, canaryCloneset.Spec.UpdateStrategy.Type)
 	}
 
 	// Create the labels map but filter unwanted labels
-	labels := includeLabelsByPrefix(canaryDae.Labels, includeLabelPrefix)
+	labels := includeLabelsByPrefix(canaryCloneset.Labels, includeLabelPrefix)
 
-	label, labelValue, err := c.getSelectorLabel(canaryDae)
+	label, labelValue, err := c.getSelectorLabel(canaryCloneset)
 	primaryLabelValue := fmt.Sprintf("%s-primary", labelValue)
 	if err != nil {
 		return fmt.Errorf("getSelectorLabel failed: %w", err)
 	}
 
-	primaryDae, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), primaryName, metav1.GetOptions{})
+	primaryCloneset, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), primaryName, metav1.GetOptions{})
 	if errors.IsNotFound(err) {
 		// create primary secrets and config maps
 		configRefs, err := c.configTracker.GetTargetConfigs(cd)
@@ -252,18 +252,18 @@ func (c *CloneSetController) createPrimaryDaemonSet(cd *flaggerv1.Canary, includ
 		if err := c.configTracker.CreatePrimaryConfigs(cd, configRefs, c.includeLabelPrefix); err != nil {
 			return fmt.Errorf("CreatePrimaryConfigs failed: %w", err)
 		}
-		annotations, err := makeAnnotations(canaryDae.Spec.Template.Annotations)
+		annotations, err := makeAnnotations(canaryCloneset.Spec.Template.Annotations)
 		if err != nil {
 			return fmt.Errorf("makeAnnotations failed: %w", err)
 		}
 
 		// create primary daemonset
-		primaryDae = &appsv1.DaemonSet{
+		primaryCloneset = &kruiseappsv1alpha1.CloneSet{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        primaryName,
 				Namespace:   cd.Namespace,
 				Labels:      makePrimaryLabels(labels, primaryLabelValue, label),
-				Annotations: canaryDae.Annotations,
+				Annotations: canaryCloneset.Annotations,
 				OwnerReferences: []metav1.OwnerReference{
 					*metav1.NewControllerRef(cd, schema.GroupVersionKind{
 						Group:   flaggerv1.SchemeGroupVersion.Group,
@@ -272,10 +272,10 @@ func (c *CloneSetController) createPrimaryDaemonSet(cd *flaggerv1.Canary, includ
 					}),
 				},
 			},
-			Spec: appsv1.DaemonSetSpec{
-				MinReadySeconds:      canaryDae.Spec.MinReadySeconds,
-				RevisionHistoryLimit: canaryDae.Spec.RevisionHistoryLimit,
-				UpdateStrategy:       canaryDae.Spec.UpdateStrategy,
+			Spec: kruiseappsv1alpha1.CloneSetSpec{
+				MinReadySeconds:      canaryCloneset.Spec.MinReadySeconds,
+				RevisionHistoryLimit: canaryCloneset.Spec.RevisionHistoryLimit,
+				UpdateStrategy:       canaryCloneset.Spec.UpdateStrategy,
 				Selector: &metav1.LabelSelector{
 					MatchLabels: map[string]string{
 						label: primaryLabelValue,
@@ -283,36 +283,36 @@ func (c *CloneSetController) createPrimaryDaemonSet(cd *flaggerv1.Canary, includ
 				},
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{
-						Labels:      makePrimaryLabels(canaryDae.Spec.Template.Labels, primaryLabelValue, label),
+						Labels:      makePrimaryLabels(canaryCloneset.Spec.Template.Labels, primaryLabelValue, label),
 						Annotations: annotations,
 					},
 					// update spec with the primary secrets and config maps
-					Spec: c.configTracker.ApplyPrimaryConfigs(canaryDae.Spec.Template.Spec, configRefs),
+					Spec: c.configTracker.ApplyPrimaryConfigs(canaryCloneset.Spec.Template.Spec, configRefs),
 				},
 			},
 		}
 
-		_, err = c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Create(context.TODO(), primaryDae, metav1.CreateOptions{})
+		_, err = c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Create(context.TODO(), primaryCloneset, metav1.CreateOptions{})
 		if err != nil {
-			return fmt.Errorf("creating daemonset %s.%s failed: %w", primaryDae.Name, cd.Namespace, err)
+			return fmt.Errorf("creating cloneset %s.%s failed: %w", primaryCloneset.Name, cd.Namespace, err)
 		}
 
-		c.logger.With("canary", fmt.Sprintf("%s.%s", cd.Name, cd.Namespace)).Infof("DaemonSet %s.%s created", primaryDae.GetName(), cd.Namespace)
+		c.logger.With("canary", fmt.Sprintf("%s.%s", cd.Name, cd.Namespace)).Infof("CloneSet %s.%s created", primaryCloneset.GetName(), cd.Namespace)
 	}
 	return nil
 }
 
 // getSelectorLabel returns the selector match label
-func (c *CloneSetController) getSelectorLabel(daemonSet *appsv1.DaemonSet) (string, string, error) {
+func (c *CloneSetController) getSelectorLabel(cloneSet *kruiseappsv1alpha1.CloneSet) (string, string, error) {
 	for _, l := range c.labels {
-		if _, ok := daemonSet.Spec.Selector.MatchLabels[l]; ok {
-			return l, daemonSet.Spec.Selector.MatchLabels[l], nil
+		if _, ok := cloneSet.Spec.Selector.MatchLabels[l]; ok {
+			return l, cloneSet.Spec.Selector.MatchLabels[l], nil
 		}
 	}
 
 	return "", "", fmt.Errorf(
-		"daemonset %s.%s spec.selector.matchLabels must contain one of %v'",
-		daemonSet.Name, daemonSet.Namespace, c.labels,
+		"cloneset %s.%s spec.selector.matchLabels must contain one of %v'",
+		cloneSet.Name, cloneSet.Namespace, c.labels,
 	)
 }
 
