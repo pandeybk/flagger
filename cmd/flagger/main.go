@@ -51,6 +51,8 @@ import (
 	"github.com/fluxcd/flagger/pkg/server"
 	"github.com/fluxcd/flagger/pkg/signals"
 	"github.com/fluxcd/flagger/pkg/version"
+
+	kruiseclientset "github.com/openkruise/kruise-api/client/clientset/versioned"
 )
 
 var (
@@ -201,6 +203,20 @@ func main() {
 	// setup Slack or MS Teams notifications
 	notifierClient := initNotifier(logger)
 
+	kruisecfg, err := clientcmd.BuildConfigFromFlags(masterURL, kubeconfig)
+	if err != nil {
+		logger.Fatalf("Error building kubeconfig: %v", err)
+	}
+
+	kruisecfg.UserAgent = "kruise-manager"
+
+	kruiseClient, err := kruiseclientset.NewForConfig(kruisecfg)
+
+	if err != nil {
+		logger.Fatalf("Error building openkruise client: %s", err.Error())
+	}
+
+	logger.Infof("Connected to metrics server %s", kruiseClient)
 	// start HTTP server
 	go server.ListenAndServe(port, 3*time.Second, logger, stopCh)
 

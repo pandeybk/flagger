@@ -8,6 +8,7 @@ require (
 	github.com/davecgh/go-spew v1.1.1
 	github.com/go-logr/zapr v0.3.0
 	github.com/google/go-cmp v0.5.2
+	github.com/openkruise/kruise-api v0.8.0-1.18
 	github.com/prometheus/client_golang v1.9.0
 	github.com/stretchr/testify v1.7.0
 	go.uber.org/zap v1.14.1
