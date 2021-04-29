@@ -176,7 +176,7 @@ func (c *CloneSetController) Promote(cd *flaggerv1.Canary) error {
 	return nil
 }
 
-// HasTargetChanged returns true if the canary DaemonSet pod spec has changed
+// HasTargetChanged returns true if the canary CloneSet pod spec has changed
 func (c *CloneSetController) HasTargetChanged(cd *flaggerv1.Canary) (bool, error) {
 	targetName := cd.Spec.TargetRef.Name
 	canary, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
@@ -257,7 +257,7 @@ func (c *CloneSetController) createPrimaryCloneSet(cd *flaggerv1.Canary, include
 			return fmt.Errorf("makeAnnotations failed: %w", err)
 		}
 
-		// create primary daemonset
+		// create primary cloneset
 		primaryCloneset = &kruiseappsv1alpha1.CloneSet{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:        primaryName,

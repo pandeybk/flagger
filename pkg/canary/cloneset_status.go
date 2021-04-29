@@ -27,19 +27,10 @@ import (
 
 // SyncStatus encodes the canary pod spec and updates the canary status
 func (c *CloneSetController) SyncStatus(cd *flaggerv1.Canary, status flaggerv1.CanaryStatus) error {
-	dae, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), cd.Spec.TargetRef.Name, metav1.GetOptions{})
+	cloneSet, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), cd.Spec.TargetRef.Name, metav1.GetOptions{})
+
 	if err != nil {
-		return fmt.Errorf("daemonset %s.%s get query error: %w", cd.Spec.TargetRef.Name, cd.Namespace, err)
-	}
-
-	// ignore `daemonSetScaleDownNodeSelector` node selector
-	for key := range daemonSetScaleDownNodeSelector {
-		delete(dae.Spec.Template.Spec.NodeSelector, key)
-	}
-
-	// since nil and capacity zero map would have different hash, we have to initialize here
-	if dae.Spec.Template.Spec.NodeSelector == nil {
-		dae.Spec.Template.Spec.NodeSelector = map[string]string{}
+		return fmt.Errorf("cloneset %s.%s get query error: %w", cd.Spec.TargetRef.Name, cd.Namespace, err)
 	}
 
 	configs, err := c.configTracker.GetConfigRefs(cd)
@@ -47,7 +38,7 @@ func (c *CloneSetController) SyncStatus(cd *flaggerv1.Canary, status flaggerv1.C
 		return fmt.Errorf("GetConfigRefs failed: %w", err)
 	}
 
-	return syncCanaryStatus(c.flaggerClient, cd, status, dae.Spec.Template, func(cdCopy *flaggerv1.Canary) {
+	return syncCanaryStatus(c.flaggerClient, cd, status, cloneSet.Spec.Template, func(cdCopy *flaggerv1.Canary) {
 		cdCopy.Status.TrackedConfigs = configs
 	})
 }

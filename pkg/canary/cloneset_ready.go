@@ -21,71 +21,92 @@ import (
 	"fmt"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	flaggerv1 "github.com/fluxcd/flagger/pkg/apis/flagger/v1beta1"
+	kruiseappsv1alpha1 "github.com/openkruise/kruise-api/apps/v1alpha1"
 )
 
-// IsPrimaryReady checks the primary daemonset status and returns an error if
-// the daemonset is in the middle of a rolling update
+// IsPrimaryReady checks the primary cloneset status and returns an error if
+// the cloneset is in the middle of a rolling update or if the pods are unhealthy
+// it will return a non retryable error if the rolling update is stuck
 func (c *CloneSetController) IsPrimaryReady(cd *flaggerv1.Canary) error {
 	primaryName := fmt.Sprintf("%s-primary", cd.Spec.TargetRef.Name)
-	primary, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), primaryName, metav1.GetOptions{})
+	primary, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), primaryName, metav1.GetOptions{})
+
 	if err != nil {
-		return fmt.Errorf("daemonset %s.%s get query error: %w", primaryName, cd.Namespace, err)
+		return fmt.Errorf("cloneset %s.%s get query error: %w", primaryName, cd.Namespace, err)
 	}
 
-	_, err = c.isCloneSetReady(cd, primary)
+	_, err = c.isCloneSetReady(primary, cd.GetProgressDeadlineSeconds())
 	if err != nil {
-		return fmt.Errorf("primary daemonset %s.%s not ready: %w", primaryName, cd.Namespace, err)
+		return fmt.Errorf("%s.%s not ready: %w", primaryName, cd.Namespace, err)
+	}
+
+	if primary.Spec.Replicas == int32p(0) {
+		return fmt.Errorf("halt %s.%s advancement: primary cloneset is scaled to zero",
+			cd.Name, cd.Namespace)
 	}
 	return nil
 }
 
-// IsCanaryReady checks the primary daemonset and returns an error if
-// the daemonset is in the middle of a rolling update
+// IsCanaryReady checks the canary cloneset status and returns an error if
+// the cloneset is in the middle of a rolling update or if the pods are unhealthy
+// it will return a non retriable error if the rolling update is stuck
 func (c *CloneSetController) IsCanaryReady(cd *flaggerv1.Canary) (bool, error) {
 	targetName := cd.Spec.TargetRef.Name
-	canary, err := c.kubeClient.AppsV1().DaemonSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+	canary, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
-		return true, fmt.Errorf("daemonset %s.%s get query error: %w", targetName, cd.Namespace, err)
+		return true, fmt.Errorf("cloneset %s.%s get query error: %w", targetName, cd.Namespace, err)
 	}
 
-	retryable, err := c.isCloneSetReady(cd, canary)
+	retryable, err := c.isCloneSetReady(canary, cd.GetProgressDeadlineSeconds())
 	if err != nil {
-		return retryable, fmt.Errorf("canary damonset %s.%s not ready with retryable %v: %w",
-			targetName, cd.Namespace, retryable, err)
+		return retryable, fmt.Errorf(
+			"canary cloneset %s.%s not ready: %w",
+			targetName, cd.Namespace, err,
+		)
 	}
 	return true, nil
 }
 
-// isDaemonSetReady determines if a daemonset is ready by checking the number of old version daemons
-// reference: https://github.com/kubernetes/kubernetes/blob/5232ad4a00ec93942d0b2c6359ee6cd1201b46bc/pkg/kubectl/rollout_status.go#L110
-func (c *CloneSetController) isCloneSetReady(cd *flaggerv1.Canary, daemonSet *appsv1.DaemonSet) (bool, error) {
-	if daemonSet.Generation <= daemonSet.Status.ObservedGeneration {
-		// calculate conditions
-		newCond := daemonSet.Status.UpdatedNumberScheduled < daemonSet.Status.DesiredNumberScheduled
-		availableCond := daemonSet.Status.NumberAvailable < daemonSet.Status.DesiredNumberScheduled
-		if !newCond && !availableCond {
-			return true, nil
+// isCloneSetReady determines if a cloneset is ready by checking the status conditions
+// if a cloneset has exceeded the progress deadline it returns a non retriable error
+func (c *CloneSetController) isCloneSetReady(cloneSet *kruiseappsv1alpha1.CloneSet, deadline int) (bool, error) {
+	retriable := true
+	if cloneSet.Generation <= cloneSet.Status.ObservedGeneration {
+		progress := c.getCloneSetCondition()
+		if progress != nil {
+			// Determine if the cloneset is stuck by checking if there is a minimum replicas unavailable condition
+			// and if the last update time exceeds the deadline
+			available := c.getCloneSetCondition()
+			if available != nil && available.Status == "False" && available.Reason == "MinimumReplicasUnavailable" {
+				from := available.LastTransitionTime
+				delta := time.Duration(deadline) * time.Second
+				retriable = !from.Add(delta).Before(time.Now())
+			}
 		}
 
-		// check if deadline exceeded
-		from := cd.Status.LastTransitionTime
-		delta := time.Duration(cd.GetProgressDeadlineSeconds()) * time.Second
-		if from.Add(delta).Before(time.Now()) {
-			return false, fmt.Errorf("exceeded its progressDeadlineSeconds: %d", cd.GetProgressDeadlineSeconds())
+		if progress != nil && progress.Reason == "ProgressDeadlineExceeded" {
+			return false, fmt.Errorf("cloneset %q exceeded its progress deadline", cloneSet.GetName())
+		} else if cloneSet.Spec.Replicas != nil && cloneSet.Status.UpdatedReplicas < *cloneSet.Spec.Replicas {
+			return retriable, fmt.Errorf("waiting for rollout to finish: %d out of %d new replicas have been updated",
+				cloneSet.Status.UpdatedReplicas, *cloneSet.Spec.Replicas)
+		} else if cloneSet.Status.Replicas > cloneSet.Status.UpdatedReplicas {
+			return retriable, fmt.Errorf("waiting for rollout to finish: %d old replicas are pending termination",
+				cloneSet.Status.Replicas-cloneSet.Status.UpdatedReplicas)
+		} else if cloneSet.Status.AvailableReplicas < cloneSet.Status.UpdatedReplicas {
+			return retriable, fmt.Errorf("waiting for rollout to finish: %d of %d updated replicas are available",
+				cloneSet.Status.AvailableReplicas, cloneSet.Status.UpdatedReplicas)
 		}
-
-		// retryable
-		if newCond {
-			return true, fmt.Errorf("waiting for rollout to finish: %d out of %d new pods have been updated",
-				daemonSet.Status.UpdatedNumberScheduled, daemonSet.Status.DesiredNumberScheduled)
-		} else if availableCond {
-			return true, fmt.Errorf("waiting for rollout to finish: %d of %d updated pods are available",
-				daemonSet.Status.NumberAvailable, daemonSet.Status.DesiredNumberScheduled)
-		}
+	} else {
+		return true, fmt.Errorf(
+			"waiting for rollout to finish: observed cloneset generation less then desired generation")
 	}
-	return true, fmt.Errorf("waiting for rollout to finish: observed daemonset generation less then desired generation")
+	return true, nil
+}
+
+// @TODO implement logic
+func (c *CloneSetController) getCloneSetCondition() *kruiseappsv1alpha1.CloneSetCondition {
+	return nil
 }
