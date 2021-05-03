@@ -228,6 +228,7 @@ func main() {
 			Logger:        logger,
 			KubeClient:    kubeClient,
 			FlaggerClient: flaggerClient,
+			KruiseClient:  kruiseClient,
 		}
 	} else {
 		configTracker = &canary.NopTracker{}

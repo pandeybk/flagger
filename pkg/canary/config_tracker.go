@@ -40,7 +40,7 @@ type ConfigTracker struct {
 	KubeClient    kubernetes.Interface
 	FlaggerClient clientset.Interface
 	Logger        *zap.SugaredLogger
-	kruiseClient  kruiseclientset.Interface
+	KruiseClient  kruiseclientset.Interface
 }
 
 type ConfigRefType string
@@ -145,7 +145,7 @@ func (ct *ConfigTracker) GetTargetConfigs(cd *flaggerv1.Canary) (map[string]Conf
 		vs = targetDae.Spec.Template.Spec.Volumes
 		cs = targetDae.Spec.Template.Spec.Containers
 	case "CloneSet":
-		targetCloneSet, err := ct.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
+		targetCloneSet, err := ct.KruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 		if err != nil {
 			return nil, fmt.Errorf("cloneset %s.%s get query error: %w", targetName, cd.Namespace, err)
 		}
