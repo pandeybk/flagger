@@ -224,7 +224,7 @@ func (c *CloneSetController) createPrimaryCloneSet(cd *flaggerv1.Canary, include
 
 	canaryCloneset, err := c.kruiseClient.AppsV1alpha1().CloneSets(cd.Namespace).Get(context.TODO(), targetName, metav1.GetOptions{})
 	if err != nil {
-		return fmt.Errorf("cloneset %s.%s get query error: %w", targetName, cd.Namespace, err)
+		return fmt.Errorf("cloneset %s.%s.%s get query error: %w", targetName, primaryName, cd.Namespace, err)
 	}
 
 	if canaryCloneset.Spec.UpdateStrategy.Type != "" &&

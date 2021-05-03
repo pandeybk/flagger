@@ -25,6 +25,7 @@ import (
 
 	flaggerv1 "github.com/fluxcd/flagger/pkg/apis/flagger/v1beta1"
 	clientset "github.com/fluxcd/flagger/pkg/client/clientset/versioned"
+	kruiseclientset "github.com/openkruise/kruise-api/client/clientset/versioned"
 )
 
 type Factory struct {
@@ -35,6 +36,7 @@ type Factory struct {
 	ingressAnnotationsPrefix string
 	ingressClass             string
 	logger                   *zap.SugaredLogger
+	kruiseClient             kruiseclientset.Interface
 }
 
 func NewFactory(kubeConfig *restclient.Config, kubeClient kubernetes.Interface,
@@ -42,7 +44,8 @@ func NewFactory(kubeConfig *restclient.Config, kubeClient kubernetes.Interface,
 	ingressAnnotationsPrefix string,
 	ingressClass string,
 	logger *zap.SugaredLogger,
-	meshClient clientset.Interface) *Factory {
+	meshClient clientset.Interface,
+	kruiseClient kruiseclientset.Interface) *Factory {
 	return &Factory{
 		kubeConfig:               kubeConfig,
 		meshClient:               meshClient,
@@ -51,6 +54,7 @@ func NewFactory(kubeConfig *restclient.Config, kubeClient kubernetes.Interface,
 		ingressAnnotationsPrefix: ingressAnnotationsPrefix,
 		ingressClass:             ingressClass,
 		logger:                   logger,
+		kruiseClient:             kruiseClient,
 	}
 }
 

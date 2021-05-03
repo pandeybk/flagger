@@ -220,7 +220,7 @@ func main() {
 	// start HTTP server
 	go server.ListenAndServe(port, 3*time.Second, logger, stopCh)
 
-	routerFactory := router.NewFactory(cfg, kubeClient, flaggerClient, ingressAnnotationsPrefix, ingressClass, logger, meshClient)
+	routerFactory := router.NewFactory(cfg, kubeClient, flaggerClient, ingressAnnotationsPrefix, ingressClass, logger, meshClient, kruiseClient)
 
 	var configTracker canary.Tracker
 	if enableConfigTracking {
