@@ -250,6 +250,7 @@ func main() {
 		meshProvider,
 		version.VERSION,
 		fromEnv("EVENT_WEBHOOK_URL", eventWebhook),
+		kruiseClient,
 	)
 
 	// leader election context

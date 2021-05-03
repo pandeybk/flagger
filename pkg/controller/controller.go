@@ -43,6 +43,7 @@ import (
 	"github.com/fluxcd/flagger/pkg/metrics/observers"
 	"github.com/fluxcd/flagger/pkg/notifier"
 	"github.com/fluxcd/flagger/pkg/router"
+	kruiseclientset "github.com/openkruise/kruise-api/client/clientset/versioned"
 )
 
 const controllerAgentName = "flagger"
@@ -66,6 +67,7 @@ type Controller struct {
 	observerFactory  *observers.Factory
 	meshProvider     string
 	eventWebhook     string
+	kruiseClient     kruiseclientset.Interface
 }
 
 type Informers struct {
@@ -87,6 +89,8 @@ func NewController(
 	meshProvider string,
 	version string,
 	eventWebhook string,
+	kruiseClient kruiseclientset.Interface,
+
 ) *Controller {
 	logger.Debug("Creating event broadcaster")
 	flaggerscheme.AddToScheme(scheme.Scheme)
@@ -118,6 +122,7 @@ func NewController(
 		routerFactory:    routerFactory,
 		meshProvider:     meshProvider,
 		eventWebhook:     eventWebhook,
+		kruiseClient:     kruiseClient,
 	}
 
 	flaggerInformers.CanaryInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
