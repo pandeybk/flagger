@@ -101,6 +101,7 @@ spec:
                         - DaemonSet
                         - Deployment
                         - Service
+                        - CloneSet
                     name:
                       type: string
                 autoscalerRef:

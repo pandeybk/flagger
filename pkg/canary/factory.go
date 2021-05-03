@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	clientset "github.com/fluxcd/flagger/pkg/client/clientset/versioned"
+	kruiseclientset "github.com/openkruise/kruise-api/client/clientset/versioned"
 )
 
 type Factory struct {
@@ -30,6 +31,7 @@ type Factory struct {
 	configTracker      Tracker
 	labels             []string
 	includeLabelPrefix []string
+	kruiseClient       kruiseclientset.Interface
 }
 
 func NewFactory(kubeClient kubernetes.Interface,
@@ -37,7 +39,8 @@ func NewFactory(kubeClient kubernetes.Interface,
 	configTracker Tracker,
 	labels []string,
 	includeLabelPrefix []string,
-	logger *zap.SugaredLogger) *Factory {
+	logger *zap.SugaredLogger,
+	kruiseClient kruiseclientset.Interface) *Factory {
 	return &Factory{
 		kubeClient:         kubeClient,
 		flaggerClient:      flaggerClient,
@@ -45,6 +48,7 @@ func NewFactory(kubeClient kubernetes.Interface,
 		configTracker:      configTracker,
 		labels:             labels,
 		includeLabelPrefix: includeLabelPrefix,
+		kruiseClient:       kruiseClient,
 	}
 }
 
@@ -69,6 +73,15 @@ func (factory *Factory) Controller(kind string) Controller {
 		kubeClient:    factory.kubeClient,
 		flaggerClient: factory.flaggerClient,
 	}
+	cloneSetCtrl := &CloneSetController{
+		logger:             factory.logger,
+		kubeClient:         factory.kubeClient,
+		flaggerClient:      factory.flaggerClient,
+		labels:             factory.labels,
+		configTracker:      factory.configTracker,
+		includeLabelPrefix: factory.includeLabelPrefix,
+		kruiseClient:       factory.kruiseClient,
+	}
 
 	switch kind {
 	case "DaemonSet":
@@ -77,6 +90,8 @@ func (factory *Factory) Controller(kind string) Controller {
 		return deploymentCtrl
 	case "Service":
 		return serviceCtrl
+	case "CloneSet":
+		return cloneSetCtrl
 	default:
 		return deploymentCtrl
 	}

@@ -199,6 +199,18 @@ rules:
       - /version
     verbs:
       - get
+  - apiGroups:
+    - apps.kruise.io
+    resources:
+    - clonesets
+    verbs:
+    - get
+    - list
+    - watch
+    - create
+    - update
+    - patch
+    - delete
 ---
 apiVersion: rbac.authorization.k8s.io/v1beta1
 kind: ClusterRoleBinding

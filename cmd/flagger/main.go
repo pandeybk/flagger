@@ -235,7 +235,7 @@ func main() {
 
 	includeLabelPrefixArray := strings.Split(includeLabelPrefix, ",")
 
-	canaryFactory := canary.NewFactory(kubeClient, flaggerClient, configTracker, labels, includeLabelPrefixArray, logger)
+	canaryFactory := canary.NewFactory(kubeClient, flaggerClient, configTracker, labels, includeLabelPrefixArray, logger, kruiseClient)
 
 	c := controller.NewController(
 		kubeClient,
